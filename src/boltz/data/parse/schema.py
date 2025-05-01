@@ -1,6 +1,7 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Optional
+import hashlib
 
 import click
 import numpy as np
@@ -805,12 +806,14 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
     chains: dict[str, ParsedChain] = {}
     chain_to_msa: dict[str, str] = {}
     entity_to_seq: dict[str, str] = {}
+    chain_to_hash: dict[str, str] = {}
     is_msa_custom = False
     is_msa_auto = False
     for entity_id, items in enumerate(items_to_group.values()):
         # Get entity type and sequence
         entity_type = next(iter(items[0].keys())).lower()
 
+        hash_seq = None
         # Ensure all the items share the same msa
         msa = -1
         if entity_type == "protein":
@@ -864,6 +867,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             # Extract sequence
             seq = items[0][entity_type]["sequence"]
             entity_to_seq[entity_id] = seq
+            hash_seq = hashlib.blake2s(seq.encode(), digest_size=10).hexdigest()  # 20 chars
 
             # Convert sequence to tokens
             seq = [token_map.get(c, unk_token) for c in list(seq)]
@@ -934,7 +938,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
 
             success = compute_3d_conformer(mol)
             if not success:
-                msg = f"Failed to compute 3D conformer for {seq}"
+                msg = f"Failed to compute 3D conformer for {seq} in {name}"
                 raise ValueError(msg)
 
             mol_no_h = AllChem.RemoveHs(mol)
@@ -967,6 +971,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             for chain_name in ids:
                 chains[chain_name] = parsed_chain
                 chain_to_msa[chain_name] = msa
+                chain_to_hash[chain_name] = hash_seq
 
     # Check if msa is custom or auto
     if is_msa_custom and is_msa_auto:
@@ -1243,6 +1248,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             num_residues=int(chain["res_num"]),
             valid=True,
             entity_id=int(chain["entity_id"]),
+            hash_seq=chain_to_hash[chain["name"]],
         )
         chain_infos.append(chain_info)
 

@@ -404,9 +404,11 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
                 # Add to generate list, assigning entity id
                 if (chain.mol_type == prot_id) and (chain.msa_id == 0):
                     entity_id = chain.entity_id
-                    msa_id = f"{target_id}_{entity_id}"
-                    to_generate[msa_id] = target.sequences[entity_id]
-                    chain.msa_id = msa_dir / f"{msa_id}.csv"
+                    msa_id = chain.hash_seq  # f"{target_id}_{entity_id}"
+                    msa_path = msa_dir / f"{msa_id}.csv"
+                    if not msa_path.exists():
+                        to_generate[msa_id] = target.sequences[entity_id]
+                    chain.msa_id = msa_path
 
                 # We do not support msa generation for non-protein chains
                 elif chain.msa_id == 0:
@@ -429,9 +431,9 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
                 )
 
             # Parse MSA data
-            msas = sorted({c.msa_id for c in target.record.chains if c.msa_id != -1})
+            msas = {c.hash_seq:c.msa_id for c in target.record.chains if c.msa_id != -1}
             msa_id_map = {}
-            for msa_idx, msa_id in enumerate(msas):
+            for msa_idx, msa_id in msas.items():
                 # Check that raw MSA exists
                 msa_path = Path(msa_id)
                 if not msa_path.exists():
@@ -439,8 +441,8 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
                     raise FileNotFoundError(msg)
 
                 # Dump processed MSA
-                processed = processed_msa_dir / f"{target_id}_{msa_idx}.npz"
-                msa_id_map[msa_id] = f"{target_id}_{msa_idx}"
+                processed = processed_msa_dir / f"{msa_idx}.npz"
+                msa_id_map[msa_id] = f"{msa_idx}"
                 if not processed.exists():
                     # Parse A3M
                     if msa_path.suffix == ".a3m":
