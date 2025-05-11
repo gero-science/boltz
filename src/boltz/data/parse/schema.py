@@ -6,9 +6,10 @@ import hashlib
 import click
 import numpy as np
 from rdkit import Chem, rdBase
-from rdkit.Chem import AllChem
+from rdkit.Chem import AllChem, HybridizationType
 from rdkit.Chem.rdchem import BondStereo, Conformer, Mol
 from rdkit.Chem.rdDistGeom import GetMoleculeBoundsMatrix
+from rdkit.Chem.rdMolDescriptors import CalcNumHeavyAtoms
 
 from boltz.data import const
 from boltz.data.types import (
@@ -315,7 +316,7 @@ def compute_chiral_atom_constraints(mol, idx_map):
             neighbors = tuple(neighbor[0] for neighbor in neighbors)
             is_r = orientation == "R"
 
-            if len(neighbors) > 4:
+            if len(neighbors) > 4 or center.GetHybridization() != HybridizationType.SP3:
                 continue
 
             atom_idxs = (*neighbors[:3], center_idx)
@@ -451,6 +452,7 @@ def parse_ccd_residue(
     name: str,
     ref_mol: Mol,
     res_idx: int,
+    remove_oxt_atom: bool = False
 ) -> Optional[ParsedResidue]:
     """Parse an MMCIF ligand.
 
@@ -474,12 +476,10 @@ def parse_ccd_residue(
     """
     unk_chirality = const.chirality_type_ids[const.unk_chirality_type]
 
-    # Remove hydrogens
-    ref_mol = AllChem.RemoveHs(ref_mol, sanitize=False)
-    Chem.AssignStereochemistry(ref_mol, cleanIt=True, force=True)
-
     # Check if this is a single atom CCD residue
-    if ref_mol.GetNumAtoms() == 1:
+    if CalcNumHeavyAtoms(ref_mol) == 1:
+        # Remove hydrogens
+        ref_mol = AllChem.RemoveHs(ref_mol, sanitize=False)
         pos = (0, 0, 0)
         ref_atom = ref_mol.GetAtoms()[0]
         chirality_type = const.chirality_type_ids.get(
@@ -518,8 +518,17 @@ def parse_ccd_residue(
     idx_map = {}  # Used for bonds later
 
     for i, atom in enumerate(ref_mol.GetAtoms()):
+        # Ignore Hydrogen atoms
+        if atom.GetAtomicNum() == 1:
+            continue
+
         # Get atom name, charge, element and reference coordinates
         atom_name = atom.GetProp("name")
+
+        # Drop OXT atoms for non-canonical amino acids.
+        if remove_oxt_atom and atom_name == 'OXT':
+            continue
+
         charge = atom.GetFormalCharge()
         element = atom.GetAtomicNum()
         ref_coords = conformer.GetAtomPosition(atom.GetIdx())
@@ -646,6 +655,7 @@ def parse_polymer(
                 name=res_corrected,
                 ref_mol=ref_mol,
                 res_idx=res_idx,
+                remove_oxt_atom=True,
             )
             parsed.append(residue)
             continue
@@ -941,11 +951,9 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 msg = f"Failed to compute 3D conformer for {seq} in {name}"
                 raise ValueError(msg)
 
-            mol_no_h = AllChem.RemoveHs(mol)
-            Chem.AssignStereochemistry(mol_no_h, cleanIt=True, force=True)
             residue = parse_ccd_residue(
                 name="LIG",
-                ref_mol=mol_no_h,
+                ref_mol=mol,
                 res_idx=0,
             )
             parsed_chain = ParsedChain(
