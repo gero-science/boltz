@@ -518,8 +518,9 @@ def process_input(  # noqa: C901, PLR0912, PLR0915, D103
             if (chain.mol_type == prot_id) and (chain.msa_id == 0):
                 entity_id = chain.entity_id
                 msa_id = chain.hash_seq  # f"{target_id}_{entity_id}"
-                to_generate[msa_id] = target.sequences[entity_id]
                 chain.msa_id = msa_dir / f"{msa_id}.csv"
+                if not chain.msa_id.exists():
+                    to_generate[msa_id] = target.sequences[entity_id]
 
             # We do not support msa generation for non-protein chains
             elif chain.msa_id == 0:
