@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass
 from functools import partial
 from multiprocessing import Pool
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, Optional, Union, Iterable
 
 import click
 import torch
@@ -301,14 +301,13 @@ def check_inputs(data: Path) -> list[Path]:
         # an error on directory and other file types
         for d in data:
             if d.is_dir():
-                msg = f"Found directory {d} instead of .fasta or .yaml."
-                raise RuntimeError(msg)
+                click.echo(f"Found directory {d} instead of .fasta or .yaml., skipping")
+                data.remove(d)
+                continue
             if d.suffix not in (".fa", ".fas", ".fasta", ".yml", ".yaml"):
-                msg = (
-                    f"Unable to parse filetype {d.suffix}, "
-                    "please provide a .fasta or .yaml file."
-                )
-                raise RuntimeError(msg)
+                click.echo(f"Unable to parse filetype {d.suffix} for {d}, skipping")
+                data.remove(d)
+                continue
     else:
         data = [data]
 
@@ -733,6 +732,26 @@ def process_inputs(
     manifest = Manifest(records)
     manifest.dump(out_dir / "processed" / "manifest.json")
 
+def setup_trainer(manifest: Manifest, devices: Union[int, Iterable[int], None]):
+    # Set up trainer
+    strategy = "auto"
+    if (isinstance(devices, int) and devices > 1) or (
+        isinstance(devices, list) and len(devices) > 1
+    ):
+        start_method = "fork" if platform.system() != "win32" else "spawn"
+        strategy = DDPStrategy(start_method=start_method)
+        if len(manifest.records) < devices:
+            msg = (
+                "Number of requested devices is greater "
+                "than the number of predictions, taking the minimum."
+            )
+            click.echo(msg)
+            if isinstance(devices, list):
+                devices = devices[: max(1, len(manifest.records))]
+            else:
+                devices = max(1, min(len(manifest.records), devices))
+    return strategy, devices
+
 
 @click.group()
 def cli() -> None:
@@ -1078,23 +1097,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         ),
     )
 
-    # Set up trainer
-    strategy = "auto"
-    if (isinstance(devices, int) and devices > 1) or (
-        isinstance(devices, list) and len(devices) > 1
-    ):
-        start_method = "fork" if platform.system() != "win32" else "spawn"
-        strategy = DDPStrategy(start_method=start_method)
-        if len(filtered_manifest.records) < devices:
-            msg = (
-                "Number of requested devices is greater "
-                "than the number of predictions, taking the minimum."
-            )
-            click.echo(msg)
-            if isinstance(devices, list):
-                devices = devices[: max(1, len(filtered_manifest.records))]
-            else:
-                devices = max(1, min(len(filtered_manifest.records), devices))
+    strategy, devices_diff = setup_trainer(filtered_manifest, devices)
 
     # Set up model parameters
     if model == "boltz2":
@@ -1128,7 +1131,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         strategy=strategy,
         callbacks=[pred_writer],
         accelerator=accelerator,
-        devices=devices,
+        devices=devices_diff,
         precision=32 if model == "boltz1" else "bf16-mixed",
     )
 
@@ -1267,7 +1270,18 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         )
         model_module.eval()
 
-        trainer.callbacks[0] = pred_writer
+        # Reinitialize trainer
+        strategy, devices_aff = setup_trainer(manifest_filtered, devices)
+
+        trainer = Trainer(
+            default_root_dir=out_dir,
+            strategy=strategy,
+            callbacks=[pred_writer],
+            accelerator=accelerator,
+            devices=devices,
+            precision=32 if model == "boltz1" else "bf16-mixed",
+        )
+
         trainer.predict(
             model_module,
             datamodule=data_module,
