@@ -1039,7 +1039,8 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
     properties = schema.get("properties", [])
     if properties and not boltz_2:
         msg = "Affinity prediction is only supported for Boltz2!"
-        raise ValueError(msg)
+        # click.echo(msg)
+        properties = []
 
     for prop in properties:
         prop_type = next(iter(prop.keys())).lower()
