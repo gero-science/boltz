@@ -12,6 +12,7 @@ import boltz.model.layers.initialize as init
 from boltz.model.layers.transition import Transition
 from boltz.model.modules.transformersv2 import AtomTransformer
 from boltz.model.modules.utils import LinearNoBias
+from boltz.utils import boltz_device_type
 
 
 class FourierEmbedding(Module):
@@ -309,7 +310,7 @@ class AtomEncoder(Module):
         s_trunk=None,  # Float['bm n ts'],
         z=None,  # Float['bm n n tz'],
     ):
-        with torch.autocast("cuda", enabled=False):
+        with torch.autocast(boltz_device_type(), enabled=False):
             B, N, _ = feats["ref_pos"].shape
             atom_mask = feats["atom_pad_mask"].bool()  # Bool['b m'],
 
@@ -478,7 +479,7 @@ class AtomAttentionEncoder(Module):
             to_keys=to_keys,
         )
 
-        with torch.autocast("cuda", enabled=False):
+        with torch.autocast(boltz_device_type(), enabled=False):
             q_to_a = self.atom_to_token_trans(q).float()
             atom_to_token = feats["atom_to_token"].float()
             atom_to_token = atom_to_token.repeat_interleave(multiplicity, 0)
@@ -541,7 +542,7 @@ class AtomAttentionDecoder(Module):
         to_keys,
         multiplicity=1,
     ):
-        with torch.autocast("cuda", enabled=False):
+        with torch.autocast(boltz_device_type(), enabled=False):
             atom_to_token = feats["atom_to_token"].float()
             atom_to_token = atom_to_token.repeat_interleave(multiplicity, 0)
 

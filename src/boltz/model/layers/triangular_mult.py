@@ -19,7 +19,13 @@ def kernel_triangular_mult(
     g_out_weight,
     eps,
 ):
-    from cuequivariance_torch.primitives.triangle import triangle_multiplicative_update
+    try:
+        from cuequivariance_torch.primitives.triangle import triangle_multiplicative_update
+    except ImportError as e:
+        raise ImportError(
+            "cuequivariance_torch is required for CUDA kernels. "
+            "Install it or disable kernels (use_kernels=False)."
+        ) from e
     return triangle_multiplicative_update(
         x,
         direction=direction,

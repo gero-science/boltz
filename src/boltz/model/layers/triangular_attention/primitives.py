@@ -25,6 +25,7 @@ from boltz.model.layers.triangular_attention.utils import (
     flatten_final_dims,
     permute_final_dims,
 )
+from boltz.utils import boltz_device_type
 
 
 class Linear(nn.Linear):
@@ -103,7 +104,7 @@ class Linear(nn.Linear):
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         d = input.dtype
         if self.precision is not None:
-            with torch.autocast("cuda", enabled=False):
+            with torch.autocast(boltz_device_type(), enabled=False):
                 bias = (
                     self.bias.to(dtype=self.precision)
                     if self.bias is not None
@@ -116,7 +117,7 @@ class Linear(nn.Linear):
                 ).to(dtype=d)
 
         if d is torch.bfloat16:
-            with torch.autocast("cuda", enabled=False):
+            with torch.autocast(boltz_device_type(), enabled=False):
                 bias = self.bias.to(dtype=d) if self.bias is not None else None
                 return nn.functional.linear(input, self.weight.to(dtype=d), bias)
 
@@ -136,7 +137,7 @@ class LayerNorm(nn.Module):
     def forward(self, x):
         d = x.dtype
         if d is torch.bfloat16:
-            with torch.autocast("cuda", enabled=False):
+            with torch.autocast(boltz_device_type(), enabled=False):
                 out = nn.functional.layer_norm(
                     x,
                     self.c_in,
@@ -164,7 +165,7 @@ def softmax_no_cast(t: torch.Tensor, dim: int = -1) -> torch.Tensor:
     """
     d = t.dtype
     if d is torch.bfloat16:
-        with torch.autocast("cuda", enabled=False):
+        with torch.autocast(boltz_device_type(), enabled=False):
             s = torch.nn.functional.softmax(t, dim=dim)
     else:
         s = torch.nn.functional.softmax(t, dim=dim)
@@ -198,7 +199,13 @@ def _attention(
 
 @torch.compiler.disable
 def kernel_triangular_attn(q, k, v, tri_bias, mask, scale):
-    from cuequivariance_torch.primitives.triangle import triangle_attention
+    try:
+        from cuequivariance_torch.primitives.triangle import triangle_attention
+    except ImportError as e:
+        raise ImportError(
+            "cuequivariance_torch is required for CUDA kernels. "
+            "Install it or disable kernels (use_kernels=False)."
+        ) from e
     return triangle_attention(q, k, v, tri_bias, mask=mask, scale=scale)
 
 

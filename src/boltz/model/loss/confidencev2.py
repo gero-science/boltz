@@ -3,6 +3,7 @@ from torch import nn
 
 from boltz.data import const
 from boltz.model.layers.confidence_utils import compute_frame_pred, tm_function
+from boltz.utils import boltz_device_type
 
 
 def confidence_loss(
@@ -95,7 +96,7 @@ def resolved_loss(
     multiplicity=1,
     mask_loss=None,
 ):
-    with torch.autocast("cuda", enabled=False):
+    with torch.autocast(boltz_device_type(), enabled=False):
         if token_level_confidence:
             token_to_rep_atom = feats["token_to_rep_atom"]
             token_to_rep_atom = token_to_rep_atom.repeat_interleave(

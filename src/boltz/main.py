@@ -721,6 +721,9 @@ def process_inputs(
             "and API key authentication (--api_key_header/--api_key_value). Please use only one authentication method."
         )
 
+    # Remember all requested input IDs before filtering
+    all_input_ids = {d.stem for d in data}
+
     # Check if records exist at output path
     records_dir = out_dir / "processed" / "records"
     if records_dir.exists():
@@ -738,7 +741,8 @@ def process_inputs(
             )
         else:
             click.echo("All inputs are already processed.")
-            updated_manifest = Manifest(existing)
+            relevant = [r for r in existing if r.id in all_input_ids]
+            updated_manifest = Manifest(relevant)
             updated_manifest.dump(out_dir / "processed" / "manifest.json")
 
     # Create output directories
@@ -803,8 +807,12 @@ def process_inputs(
             process_input_partial(path)
 
     # Dump manifest
-    # Load all records and write manifest
-    records = [Record.load(p) for p in records_dir.glob("*.json")]
+    # Only include records matching the current input files
+    records = [
+        Record.load(p)
+        for p in records_dir.glob("*.json")
+        if p.stem in all_input_ids
+    ]
     manifest = Manifest(records)
     manifest.dump(out_dir / "processed" / "manifest.json")
 
@@ -866,7 +874,7 @@ def cli() -> None:
 )
 @click.option(
     "--accelerator",
-    type=click.Choice(["gpu", "cpu", "tpu"]),
+    type=click.Choice(["gpu", "cpu", "tpu", "mps"]),
     help="The accelerator to use for prediction. Default is gpu.",
     default="gpu",
 )
@@ -1257,6 +1265,14 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         write_embeddings=write_embeddings,
     )
 
+    # Set precision based on accelerator and model
+    if model == "boltz1":
+        precision = 32
+    elif accelerator == "mps":
+        precision = "16-mixed"
+    else:
+        precision = "bf16-mixed"
+
     # Set up trainer
     trainer = Trainer(
         default_root_dir=out_dir,
@@ -1264,7 +1280,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         callbacks=[pred_writer],
         accelerator=accelerator,
         devices=devices_diff,
-        precision=32 if model == "boltz1" else "bf16-mixed",
+        precision=precision,
     )
 
     if filtered_manifest.records:
@@ -1410,13 +1426,21 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         # Reinitialize trainer
         strategy, devices_aff = setup_trainer(manifest_filtered, devices)
 
+        # Set precision based on accelerator and model
+        if model == "boltz1":
+            aff_precision = 32
+        elif accelerator == "mps":
+            aff_precision = "16-mixed"
+        else:
+            aff_precision = "bf16-mixed"
+
         trainer = Trainer(
             default_root_dir=out_dir,
             strategy=strategy,
             callbacks=[pred_writer],
             accelerator=accelerator,
             devices=devices,
-            precision=32 if model == "boltz1" else "bf16-mixed",
+            precision=aff_precision,
         )
 
         trainer.predict(

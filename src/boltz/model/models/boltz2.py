@@ -35,6 +35,7 @@ from boltz.model.modules.trunkv2 import (
 )
 from boltz.model.optim.ema import EMA
 from boltz.model.optim.scheduler import AlphaFoldLRScheduler
+from boltz.utils import boltz_device_type
 
 
 class Boltz2(LightningModule):
@@ -529,7 +530,7 @@ class Boltz2(LightningModule):
                     "token_trans_bias": token_trans_bias,
                 }
 
-                with torch.autocast("cuda", enabled=False):
+                with torch.autocast(boltz_device_type(), enabled=False):
                     struct_out = self.structure_module.sample(
                         s_trunk=s.float(),
                         s_inputs=s_inputs.float(),
@@ -568,7 +569,7 @@ class Boltz2(LightningModule):
                 feats["coords"] = atom_coords  # (multiplicity, L, 3)
                 assert len(feats["coords"].shape) == 3
 
-                with torch.autocast("cuda", enabled=False):
+                with torch.autocast(boltz_device_type(), enabled=False):
                     struct_out = self.structure_module(
                         s_trunk=s.float(),
                         s_inputs=s_inputs.float(),
@@ -625,7 +626,7 @@ class Boltz2(LightningModule):
             ]
             s_inputs = self.input_embedder(feats, affinity=True)
 
-            with torch.autocast("cuda", enabled=False):
+            with torch.autocast(boltz_device_type(), enabled=False):
                 if self.affinity_ensemble:
                     dict_out_affinity1 = self.affinity_module1(
                         s_inputs=s_inputs.detach(),
@@ -985,7 +986,7 @@ class Boltz2(LightningModule):
         ]
         if len(parameters) == 0:
             return torch.tensor(
-                0.0, device="cuda" if torch.cuda.is_available() else "cpu"
+                0.0, device=self.device
             )
         norm = torch.stack(parameters).sum().sqrt()
         return norm
@@ -994,7 +995,7 @@ class Boltz2(LightningModule):
         parameters = [p.norm(p=2) ** 2 for p in module.parameters() if p.requires_grad]
         if len(parameters) == 0:
             return torch.tensor(
-                0.0, device="cuda" if torch.cuda.is_available() else "cpu"
+                0.0, device=self.device
             )
         norm = torch.stack(parameters).sum().sqrt()
         return norm
@@ -1022,7 +1023,8 @@ class Boltz2(LightningModule):
                 if "out of memory" in str(e):
                     msg = f"| WARNING: ran out of memory, skipping batch, {idx_dataset}"
                     print(msg)
-                    torch.cuda.empty_cache()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
                     gc.collect()
                     return
                 raise e
@@ -1042,7 +1044,8 @@ class Boltz2(LightningModule):
                 if "out of memory" in str(e):
                     msg = f"| WARNING: ran out of memory, skipping batch, {idx_dataset}"
                     print(msg)
-                    torch.cuda.empty_cache()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
                     gc.collect()
                     return
                 raise e
@@ -1123,7 +1126,8 @@ class Boltz2(LightningModule):
         except RuntimeError as e:  # catch out of memory exceptions
             if "out of memory" in str(e):
                 print("| WARNING: ran out of memory, skipping batch")
-                torch.cuda.empty_cache()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
                 gc.collect()
                 return {"exception": True}
             else:
